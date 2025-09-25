@@ -1,213 +1,203 @@
-#include <SFML/Graphics.hpp>
-#include <vector>
-#include <cstdlib>
-#include <ctime>
-#include <sstream>
+﻿#include <SFML/Graphics.hpp>
+#include <SFML/Audio.hpp>
+#include <deque>
+#include <random>
+#include <string>
+#include <cmath>
 
-// Spielfeld-Konfiguration
-const int CELL_SIZE = 20;
-const int GRID_WIDTH = 30;
-const int GRID_HEIGHT = 20;
-const int WINDOW_WIDTH = GRID_WIDTH * CELL_SIZE;
-const int WINDOW_HEIGHT = GRID_HEIGHT * CELL_SIZE;
-const int FRAME_RATE = 10;
+constexpr int WINDOW_WIDTH = 1024;
+constexpr int WINDOW_HEIGHT = 1024;
+constexpr int CELL_SIZE = 32;
+constexpr int COLS = WINDOW_WIDTH / CELL_SIZE;
+constexpr int ROWS = WINDOW_HEIGHT / CELL_SIZE;
 
 enum Direction { Up, Down, Left, Right };
+struct Segment { int x, y; };
 
-struct Segment {
-    int x, y;
-    Segment(int x, int y) : x(x), y(y) {}
-};
+int main()
+{
+    sf::RenderWindow window(sf::VideoMode(WINDOW_WIDTH, WINDOW_HEIGHT), "Snake Game SVI");
+    window.setFramerateLimit(10);
 
-class Snake {
-public:
-    Snake() {
-        reset();
-    }
+    // Musik laden und starten
+    sf::Music music;
+    if (!music.openFromFile("startscreen.ogg")) return 1;
+    music.setLoop(true);
+    music.play();
 
-    void reset() {
-        segments.clear();
-        segments.push_back(Segment(GRID_WIDTH / 2, GRID_HEIGHT / 2));
-        dir = Right;
-        growNext = false;
-    }
+    // Startscreen-Hintergrund
+    sf::Texture startTexture;
+    if (!startTexture.loadFromFile("startscreen.png")) return 1;
+    sf::Sprite startSprite(startTexture);
+    startSprite.setScale(
+        float(WINDOW_WIDTH) / startTexture.getSize().x,
+        float(WINDOW_HEIGHT) / startTexture.getSize().y
+    );
 
-    void setDirection(Direction newDir) {
-        if ((dir == Up && newDir == Down) || (dir == Down && newDir == Up) ||
-            (dir == Left && newDir == Right) || (dir == Right && newDir == Left))
-            return;
-        dir = newDir;
-    }
-
-    void move() {
-        Segment head = segments[0];
-        switch (dir) {
-        case Up:    head.y--; break;
-        case Down:  head.y++; break;
-        case Left:  head.x--; break;
-        case Right: head.x++; break;
-        }
-
-        segments.insert(segments.begin(), head);
-
-        if (growNext)
-            growNext = false;
-        else
-            segments.pop_back();
-    }
-
-    void grow() {
-        growNext = true;
-    }
-
-    bool checkCollision() {
-        const Segment& head = segments[0];
-
-        // Wandkollision
-        if (head.x < 0 || head.x >= GRID_WIDTH || head.y < 0 || head.y >= GRID_HEIGHT)
-            return true;
-
-        // Selbstkollision
-        for (size_t i = 1; i < segments.size(); ++i) {
-            if (head.x == segments[i].x && head.y == segments[i].y)
-                return true;
-        }
-
-        return false;
-    }
-
-    const std::vector<Segment>& getSegments() const {
-        return segments;
-    }
-
-    Segment getHead() const {
-        return segments[0];
-    }
-
-private:
-    std::vector<Segment> segments;
-    Direction dir;
-    bool growNext;
-};
-
-sf::Vector2i generateFood(const Snake& snake) {
-    sf::Vector2i food;
-    bool onSnake;
-    do {
-        food.x = std::rand() % GRID_WIDTH;
-        food.y = std::rand() % GRID_HEIGHT;
-        onSnake = false;
-        for (const auto& segment : snake.getSegments()) {
-            if (segment.x == food.x && segment.y == food.y) {
-                onSnake = true;
-                break;
-            }
-        }
-    } while (onSnake);
-    return food;
-}
-
-int main() {
-    std::srand(static_cast<unsigned>(std::time(nullptr)));
-
-    sf::RenderWindow window(sf::VideoMode({ WINDOW_WIDTH, WINDOW_HEIGHT }), "Snake Game");
-    window.setFramerateLimit(FRAME_RATE);
-
+    // Schriftart laden
     sf::Font font;
-    if (!font.openFromFile("arial.ttf"))
-    {
-        return 1;  // Stelle sicher, dass eine Schriftart vorhanden ist
-    }
+    if (!font.loadFromFile("PressStart2P.ttf")) return 1;
 
-    Snake snake;
-    sf::Vector2i food = generateFood(snake);
-    int score = 0;
+    // Titeltext oben
+    sf::Text title("SNAKE GAME SVI", font, 32);
+    title.setFillColor(sf::Color(255, 220, 100));
+    sf::FloatRect titleBounds = title.getLocalBounds();
+    title.setOrigin(titleBounds.left + titleBounds.width / 2.f, titleBounds.top + titleBounds.height / 2.f);
+    title.setPosition(WINDOW_WIDTH / 2.f, 80.f);
+
+    // Hinweistext Mitte
+    sf::Text pressKey("Drücke eine Taste zum Starten", font, 20);
+    pressKey.setFillColor(sf::Color(255, 220, 100));
+    sf::FloatRect keyBounds = pressKey.getLocalBounds();
+    pressKey.setOrigin(keyBounds.left + keyBounds.width / 2.f, keyBounds.top + keyBounds.height / 2.f);
+    pressKey.setPosition(WINDOW_WIDTH / 2.f, WINDOW_HEIGHT / 2.f);
+
+    // Credits unten
+    sf::Text credits("Ein Spiel von Iheb Ben Kraiem und Tsu", font, 16);
+    credits.setFillColor(sf::Color(200, 180, 80));
+    sf::FloatRect creditBounds = credits.getLocalBounds();
+    credits.setOrigin(creditBounds.left + creditBounds.width / 2.f, creditBounds.top + creditBounds.height / 2.f);
+    credits.setPosition(WINDOW_WIDTH / 2.f, WINDOW_HEIGHT - 40.f);
+
+    sf::Text scoreText("", font, 20);
+    scoreText.setFillColor(sf::Color::Yellow);
+    scoreText.setPosition(20.f, 20.f);
+
+    sf::Text gameOverText("GAME OVER", font, 48);
+    gameOverText.setFillColor(sf::Color::Red);
+    gameOverText.setPosition(WINDOW_WIDTH / 2.f - 200.f, WINDOW_HEIGHT / 2.f - 50.f);
+
+    bool started = false;
     bool gameOver = false;
+    int score = 0;
 
-    /* Das habe ich ge�ndert Tsoa haha!!!
-        while (window.isOpen()) {
+    std::deque<Segment> snake{ {COLS / 2, ROWS / 2} };
+    Direction dir = Right;
+
+    std::mt19937 rng{ std::random_device{}() };
+    std::uniform_int_distribution<int> distX(0, COLS - 1);
+    std::uniform_int_distribution<int> distY(0, ROWS - 1);
+    Segment apple{ distX(rng), distY(rng) };
+
+    // Startscreen mit Pochen-Effekt
+    float pulseTime = 0.f;
+
+    while (window.isOpen() && !started)
+    {
         sf::Event event;
         while (window.pollEvent(event))
         {
             if (event.type == sf::Event::Closed)
                 window.close();
-        }*/
-    while (window.isOpen()) {
-        while (auto event = window.pollEvent()) {
-            if (event->is<sf::Event::Closed>()) {
-                window.close();
+            if (event.type == sf::Event::KeyPressed)
+            {
+                started = true;
+                music.stop(); // Musik beenden
             }
-
-            if (!gameOver) {
-                if (sf::Keyboard::isKeyPressed(sf::Keyboard::Scancode::Up)) snake.setDirection(Up);
-                else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Scancode::Down)) snake.setDirection(Down);
-                else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Scancode::Left)) snake.setDirection(Left);
-                else if (sf::Keyboard::isKeyPressed(sf::Keyboard::Scancode::Right)) snake.setDirection(Right);
-
-                snake.move();
-
-                if (snake.getHead().x == food.x && snake.getHead().y == food.y) {
-                    snake.grow();
-                    food = generateFood(snake);
-                    score += 10;
-                }
-
-                if (snake.checkCollision()) {
-                    gameOver = true;
-                }
-            }
-            else {
-                // Neustart mit Enter
-                if (sf::Keyboard::isKeyPressed(sf::Keyboard::Scancode::Enter)) {
-                    snake.reset();
-                    food = generateFood(snake);
-                    score = 0;
-                    gameOver = false;
-                }
-            }
-
-            // Zeichnen
-            window.clear(sf::Color::Black);
-
-            // Futter zeichnen
-            sf::RectangleShape foodRect(sf::Vector2f(CELL_SIZE - 2, CELL_SIZE - 2));
-            foodRect.setFillColor(sf::Color::Red);
-            foodRect.setPosition({ food.x * CELL_SIZE + 1.f, food.y * CELL_SIZE + 1.f });
-            window.draw(foodRect);
-
-            // Snake zeichnen
-            sf::RectangleShape segmentRect(sf::Vector2f(CELL_SIZE - 2, CELL_SIZE - 2));
-            segmentRect.setFillColor(sf::Color::Green);
-            for (const auto& segment : snake.getSegments()) {
-                segmentRect.setPosition({ segment.x * CELL_SIZE + 1.f, segment.y * CELL_SIZE + 1.f });
-                window.draw(segmentRect);
-            }
-
-            // Score
-            sf::Text scoreText(font);
-            scoreText.setFont(font);
-            scoreText.setCharacterSize(20);
-            scoreText.setFillColor(sf::Color::White);
-            scoreText.setString("Score: " + std::to_string(score));
-            scoreText.setPosition({ 5, 5 });
-            window.draw(scoreText);
-
-            // Game Over Text
-            if (gameOver) {
-                sf::Text goText(font);
-                goText.setFont(font);
-                goText.setCharacterSize(36);
-                goText.setFillColor(sf::Color::Red);
-                goText.setString("Game Over!\nEnter = Restart");
-                {
-                    goText.setPosition({ WINDOW_WIDTH / 2 - 130, WINDOW_HEIGHT / 2 - 50 });
-                    window.draw(goText);
-                }
-
-                window.display();
-            }
-
-           
         }
-    }return 0;
+
+        pulseTime += 0.1f;
+        float scale = 1.f + 0.05f * std::sin(pulseTime);
+        int brightness = 220 + static_cast<int>(35 * std::sin(pulseTime));
+        sf::Color pulseColor(brightness, brightness - 20, 100);
+
+        pressKey.setScale(scale, scale);
+        pressKey.setFillColor(pulseColor);
+
+        window.clear();
+        window.draw(startSprite);
+        window.draw(title);
+        window.draw(pressKey);
+        window.draw(credits);
+        window.display();
+    }
+
+    // Hauptspiel-Loop
+    while (window.isOpen())
+    {
+        sf::Event event;
+        while (window.pollEvent(event))
+        {
+            if (event.type == sf::Event::Closed)
+                window.close();
+
+            if (!gameOver && event.type == sf::Event::KeyPressed)
+            {
+                if (event.key.code == sf::Keyboard::W && dir != Down)  dir = Up;
+                if (event.key.code == sf::Keyboard::S && dir != Up)    dir = Down;
+                if (event.key.code == sf::Keyboard::A && dir != Right) dir = Left;
+                if (event.key.code == sf::Keyboard::D && dir != Left)  dir = Right;
+            }
+        }
+
+        if (!gameOver)
+        {
+            Segment head = snake.front();
+            switch (dir)
+            {
+            case Up:    head.y--; break;
+            case Down:  head.y++; break;
+            case Left:  head.x--; break;
+            case Right: head.x++; break;
+            }
+
+            if (head.x < 0 || head.x >= COLS || head.y < 0 || head.y >= ROWS)
+                gameOver = true;
+
+            for (auto& s : snake)
+                if (s.x == head.x && s.y == head.y)
+                    gameOver = true;
+
+            if (!gameOver)
+            {
+                snake.push_front(head);
+
+                if (head.x == apple.x && head.y == apple.y)
+                {
+                    score++;
+                    do {
+                        apple = { distX(rng), distY(rng) };
+                    } while (std::any_of(snake.begin(), snake.end(),
+                        [&](const Segment& s) { return s.x == apple.x && s.y == apple.y; }));
+                }
+                else
+                {
+                    snake.pop_back();
+                }
+            }
+        }
+
+        // Zeichnen
+        window.clear(sf::Color(30, 30, 30));
+
+        if (gameOver)
+        {
+            window.draw(gameOverText);
+            scoreText.setString("Punkte: " + std::to_string(score));
+            scoreText.setPosition(WINDOW_WIDTH / 2.f - 80.f, WINDOW_HEIGHT / 2.f + 30.f);
+            window.draw(scoreText);
+        }
+        else
+        {
+            sf::RectangleShape cell(sf::Vector2f(CELL_SIZE - 2, CELL_SIZE - 2));
+            cell.setFillColor(sf::Color::Red);
+            cell.setPosition(apple.x * CELL_SIZE + 1, apple.y * CELL_SIZE + 1);
+            window.draw(cell);
+
+            cell.setFillColor(sf::Color::Green);
+            for (auto& seg : snake)
+            {
+                cell.setPosition(seg.x * CELL_SIZE + 1, seg.y * CELL_SIZE + 1);
+                window.draw(cell);
+            }
+
+            scoreText.setString("Punkte: " + std::to_string(score));
+            scoreText.setPosition(20.f, 20.f);
+            window.draw(scoreText);
+        }
+
+        window.display();
+    }
+
+    return 0;
 }
